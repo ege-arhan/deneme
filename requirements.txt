@@ -11,3 +11,4 @@ python-dotenv
 tqdm
 fastapi
 uvicorn[standard]
+pytest

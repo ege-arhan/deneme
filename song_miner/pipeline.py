@@ -49,6 +49,7 @@ class SongPipeline:
         self.seen_ids_path = self.out_dir / "seen_ids.txt"
         self.audio_dir = self.out_dir / "audio"
         self.review_queue_path = self.out_dir / "review_queue.jsonl"
+        self.agent_action_log_path = self.out_dir / "agent_actions.jsonl"
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.audio_dir.mkdir(parents=True, exist_ok=True)
 
@@ -134,11 +135,25 @@ class SongPipeline:
 
         verification = self.agent.verify_record(rec)
         rec["agent_verification"] = verification
-        rec["retried_once"] = verification.get("decision") == "retry"
-        if rec["retried_once"]:
-            self.agent.observe("retry_once", rec["record_id"])
+        action = self.agent.decide_next_action(rec)
+        rec["agent_next_action"] = action
+        self._append_jsonl(self.agent_action_log_path, {
+            "record_id": rec["record_id"],
+            "action": action,
+            "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        })
 
-        if verification.get("decision") == "review":
+        rec["retried_once"] = False
+        if action.get("action") == "retry_with_no_download" and not skip_download:
+            self.agent.observe("auto_retry", rec["record_id"])
+            rec["retried_once"] = True
+            rec["retry_mode"] = "no_download"
+            retry_lyrics = lyrics or self.agent.fetch_lyrics_via_web(title or query, resolved_artist)
+            if retry_lyrics:
+                rec["lyrics"] = retry_lyrics
+                rec["agent_verification"] = self.agent.verify_record(rec)
+
+        if action.get("action") == "send_to_review_queue":
             self._append_jsonl(self.review_queue_path, rec)
 
         if self._is_duplicate(rec["record_id"]):
@@ -167,20 +182,26 @@ class SongPipeline:
         items = res.get("tracks", {}).get("items", [])
         if not items:
             return {}
-        first = items[0]
-        track_name = first.get("name") or ""
-        artist_name = first.get("artists", [{}])[0].get("name") or ""
-        q_score = SequenceMatcher(None, query.lower(), track_name.lower()).ratio()
-        a_score = SequenceMatcher(None, (artist or "").lower(), artist_name.lower()).ratio() if artist else 1.0
-        match_score = round((q_score * 0.7 + a_score * 0.3), 3)
+
+        scored = []
+        for idx, item in enumerate(items, start=1):
+            track_name = item.get("name") or ""
+            artist_name = item.get("artists", [{}])[0].get("name") or ""
+            q_score = SequenceMatcher(None, query.lower(), track_name.lower()).ratio()
+            a_score = SequenceMatcher(None, (artist or "").lower(), artist_name.lower()).ratio() if artist else 1.0
+            match_score = round((q_score * 0.7 + a_score * 0.3), 3)
+            scored.append((match_score, idx, item))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        best_score, best_rank, best = scored[0]
         return {
-            "id": first.get("id"),
-            "title": first.get("name"),
-            "artist": first.get("artists", [{}])[0].get("name"),
-            "popularity": first.get("popularity"),
-            "duration_ms": first.get("duration_ms"),
-            "rank": 1,
-            "match_score": match_score,
+            "id": best.get("id"),
+            "title": best.get("name"),
+            "artist": best.get("artists", [{}])[0].get("name"),
+            "popularity": best.get("popularity"),
+            "duration_ms": best.get("duration_ms"),
+            "rank": best_rank,
+            "match_score": best_score,
         }
 
     def _lastfm_stats(self, title: str, artist: Optional[str]) -> dict[str, Optional[int]]:
@@ -318,7 +339,8 @@ class SongPipeline:
     def _confidence_score(self, spotify_meta: dict[str, Any], lastfm_meta: dict[str, Optional[int]], lyrics: Optional[str], audio_path: Optional[str], features: dict[str, Any]) -> float:
         score = 0.0
         if spotify_meta.get("id"):
-            score += 0.3
+            score += 0.2
+        score += 0.2 * float(spotify_meta.get("match_score") or 0)
         if lastfm_meta.get("listeners") is not None:
             score += 0.2
         if lyrics and len(lyrics.split()) > 40:

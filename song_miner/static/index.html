@@ -51,8 +51,13 @@
       </section>
 
       <section class="mt-6 glass border border-slate-700 rounded-2xl p-6">
-        <h2 class="text-xl font-semibold mb-3">Review Queue</h2>
+        <div class="flex items-center justify-between mb-3"><h2 class="text-xl font-semibold">Review Queue</h2><div class="flex gap-2"><button id="approveFirstBtn" class="text-xs bg-emerald-700 px-3 py-1 rounded-lg">İlkini Onayla</button><button id="retryFirstBtn" class="text-xs bg-amber-700 px-3 py-1 rounded-lg">İlkini Retry</button></div></div>
         <pre id="reviewQueue" class="text-xs overflow-auto bg-slate-900 p-4 rounded-xl border border-slate-800 min-h-40"></pre>
+      </section>
+
+      <section class="mt-6 glass border border-slate-700 rounded-2xl p-6">
+        <h2 class="text-xl font-semibold mb-3">Agent Actions</h2>
+        <pre id="agentActions" class="text-xs overflow-auto bg-slate-900 p-4 rounded-xl border border-slate-800 min-h-40"></pre>
       </section>
     </div>
 
@@ -65,6 +70,7 @@
       const historyBtn = document.getElementById('historyBtn');
       const runAsyncBtn = document.getElementById('runAsyncBtn');
       const reviewQueueEl = document.getElementById('reviewQueue');
+      const agentActionsEl = document.getElementById('agentActions');
       let currentJobId = null;
 
       async function runAnalysis() {
@@ -97,6 +103,7 @@
           phaseEl.textContent = `Kalite skoru: ${data.result.quality_confidence} | Duplicate: ${data.result.duplicate}`;
           loadHistory();
       loadReviewQueue();
+      loadAgentActions();
           resultEl.textContent = JSON.stringify(data.result, null, 2);
         } catch (err) {
           statusEl.textContent = `Hata: ${err.message}`;
@@ -135,6 +142,7 @@
             if (jd.result) resultEl.textContent = JSON.stringify(jd.result, null, 2);
             loadHistory();
       loadReviewQueue();
+      loadAgentActions();
           }
         }, 1200);
       }
@@ -143,6 +151,22 @@
         const res = await fetch('/api/review_queue?limit=10');
         const data = await res.json();
         reviewQueueEl.textContent = JSON.stringify(data.items, null, 2);
+      }
+
+      async function loadAgentActions(){
+        const res = await fetch('/api/agent/actions?limit=10');
+        const data = await res.json();
+        agentActionsEl.textContent = JSON.stringify(data.items, null, 2);
+      }
+
+      async function resolveFirstReview(action){
+        const res = await fetch('/api/review_queue?limit=1');
+        const data = await res.json();
+        const first = (data.items || [])[0];
+        if (!first) return;
+        await fetch(`/api/review_queue/resolve?record_id=${first.record_id}&action=${action}`, {method: "POST"});
+        await loadReviewQueue();
+        await loadHistory();
       }
 
       async function cancelCurrentJob(){
@@ -155,9 +179,13 @@
       runAsyncBtn.addEventListener('click', runAsyncAnalysis);
       historyBtn.addEventListener('click', loadHistory);
       historyBtn.addEventListener('click', loadReviewQueue);
+      historyBtn.addEventListener('click', loadAgentActions);
       document.getElementById('cancelJobBtn').addEventListener('click', cancelCurrentJob);
+      document.getElementById('approveFirstBtn').addEventListener('click', () => resolveFirstReview('approve'));
+      document.getElementById('retryFirstBtn').addEventListener('click', () => resolveFirstReview('retry'));
       loadHistory();
       loadReviewQueue();
+      loadAgentActions();
     </script>
   </body>
 </html>

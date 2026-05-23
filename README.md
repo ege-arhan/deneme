@@ -151,3 +151,19 @@ LOCAL_LLM_MODEL=gemma4:4b
 - Pipeline için `run_with_hooks(...)` eklendi (stage/progress callback destekli).
 - Async job artık gerçek pipeline aşamalarından progress güncelliyor.
 - `JobManager.update(...)` ile job stage/progress dışarıdan güncellenebilir hale geldi.
+
+
+## Agentic Devam 2 (Uygulandı)
+
+- `agent_next_action` kararı eklendi (`store`, `retry_with_no_download`, `send_to_review_queue`).
+- Agent kararları `data/agent_actions.jsonl` dosyasına loglanıyor.
+- Basit otonom aksiyon: tek sorunlu kayıtta otomatik `no_download` retry tetikleniyor.
+- API: `GET /api/agent/actions`
+- UI: "Agent Actions" paneli eklendi.
+
+
+## Testler
+
+```bash
+pytest -q
+```

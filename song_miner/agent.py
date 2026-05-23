@@ -144,3 +144,13 @@ class LocalLLMAgent:
             return data.get("message", {}).get("content")
         except Exception:
             return None
+
+
+    def decide_next_action(self, record: dict[str, Any]) -> dict[str, Any]:
+        verification = record.get("agent_verification", {})
+        decision = verification.get("decision", "accept")
+        if decision == "accept":
+            return {"action": "store", "reason": "record_verified"}
+        if decision == "retry":
+            return {"action": "retry_with_no_download", "reason": "single_issue_detected"}
+        return {"action": "send_to_review_queue", "reason": "multiple_issues_detected"}

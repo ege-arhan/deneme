@@ -95,6 +95,51 @@ def agent_status() -> dict[str, str]:
         "ollama_base_url": pipeline.agent.base_url,
     }
 
+@app.get("/api/agent/actions")
+def agent_actions(limit: int = 20) -> dict[str, Any]:
+    path = Path("data") / "agent_actions.jsonl"
+    if not path.exists():
+        return {"items": []}
+    lines = path.read_text(encoding="utf-8").splitlines()[-max(1, min(limit, 200)): ]
+    items=[]
+    for line in reversed(lines):
+        try: items.append(json.loads(line))
+        except Exception: continue
+    return {"items": items}
+
+
+@app.post("/api/review_queue/resolve")
+def resolve_review(record_id: str, action: str = "approve") -> dict[str, Any]:
+    path = Path("data") / "review_queue.jsonl"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="review queue not found")
+    lines = path.read_text(encoding="utf-8").splitlines()
+    kept=[]
+    target=None
+    for line in lines:
+        try:
+            rec=json.loads(line)
+        except Exception:
+            continue
+        if rec.get("record_id") == record_id and target is None:
+            target=rec
+            continue
+        kept.append(rec)
+    if target is None:
+        raise HTTPException(status_code=404, detail="record not found")
+    with path.open("w", encoding="utf-8") as f:
+        for rec in kept:
+            f.write(json.dumps(rec, ensure_ascii=False)+"\n")
+    if action == "approve":
+        songs=Path("data")/"songs.jsonl"
+        with songs.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(target, ensure_ascii=False)+"\n")
+    elif action == "retry":
+        rerun = pipeline.run(query=target.get("query",""), artist=target.get("artist"), max_seconds=120, skip_download=True)
+        return {"ok": True, "action": action, "result": rerun}
+    return {"ok": True, "action": action, "record_id": record_id}
+
+
 @app.get("/api/review_queue")
 def review_queue(limit: int = 20) -> dict[str, Any]:
     path = Path("data") / "review_queue.jsonl"
