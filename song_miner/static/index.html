@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Song Miner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      .glass { backdrop-filter: blur(10px); background: rgba(255,255,255,0.08); }
+    </style>
+  </head>
+  <body class="min-h-screen bg-slate-950 text-slate-100">
+    <div class="max-w-5xl mx-auto px-4 py-10">
+      <header class="mb-8">
+        <h1 class="text-4xl font-bold tracking-tight">🎵 Song Miner</h1>
+        <p class="text-slate-300 mt-2">Şarkıyı indir, analiz et, söz + istatistik topla, tek tıkla kaydet.</p>
+      </header>
+
+      <section class="glass border border-slate-700 rounded-2xl p-6 shadow-2xl">
+        <div class="grid md:grid-cols-2 gap-4">
+          <label class="flex flex-col gap-2">
+            <span class="text-sm text-slate-300">Şarkı Adı</span>
+            <input id="query" class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2" placeholder="Blinding Lights" />
+          </label>
+          <label class="flex flex-col gap-2">
+            <span class="text-sm text-slate-300">Sanatçı</span>
+            <input id="artist" class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2" placeholder="The Weeknd" />
+          </label>
+          <label class="flex flex-col gap-2">
+            <span class="text-sm text-slate-300">Analiz Saniyesi</span>
+            <input id="audio_seconds" type="number" min="10" max="600" value="120" class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2" />
+          </label>
+          <label class="flex items-center gap-2 mt-7">
+            <input id="no_download" type="checkbox" class="size-4" />
+            <span class="text-sm text-slate-300">Sadece metadata/söz (ses indirme yok)</span>
+          </label>
+        </div>
+
+        <div class='mt-6 flex gap-2'><button id="runBtn" class="bg-indigo-500 hover:bg-indigo-400 transition-colors rounded-xl px-5 py-2 font-semibold">Analiz Et</button><button id="runAsyncBtn" class="bg-emerald-500 hover:bg-emerald-400 transition-colors rounded-xl px-5 py-2 font-semibold">Async Analiz</button><button id="cancelJobBtn" class="bg-rose-500 hover:bg-rose-400 transition-colors rounded-xl px-5 py-2 font-semibold">Job İptal</button></div>
+        <p id="status" class="mt-4 text-sm text-slate-300"></p><p id="phase" class="mt-1 text-xs text-slate-400"></p>
+      </section>
+
+      <section class="mt-6 glass border border-slate-700 rounded-2xl p-6">
+        <div class="flex items-center justify-between mb-3"><h2 class="text-xl font-semibold">Sonuç</h2><button id="historyBtn" class="text-xs bg-slate-800 px-3 py-1 rounded-lg border border-slate-700">Geçmişi Yenile</button></div>
+        <pre id="result" class="text-xs overflow-auto bg-slate-900 p-4 rounded-xl border border-slate-800 min-h-52"></pre>
+      </section>
+
+      <section class="mt-6 glass border border-slate-700 rounded-2xl p-6">
+        <h2 class="text-xl font-semibold mb-3">Son Kayıtlar</h2>
+        <pre id="history" class="text-xs overflow-auto bg-slate-900 p-4 rounded-xl border border-slate-800 min-h-40"></pre>
+      </section>
+
+      <section class="mt-6 glass border border-slate-700 rounded-2xl p-6">
+        <div class="flex items-center justify-between mb-3"><h2 class="text-xl font-semibold">Review Queue</h2><div class="flex gap-2"><button id="approveFirstBtn" class="text-xs bg-emerald-700 px-3 py-1 rounded-lg">İlkini Onayla</button><button id="retryFirstBtn" class="text-xs bg-amber-700 px-3 py-1 rounded-lg">İlkini Retry</button></div></div>
+        <pre id="reviewQueue" class="text-xs overflow-auto bg-slate-900 p-4 rounded-xl border border-slate-800 min-h-40"></pre>
+      </section>
+
+      <section class="mt-6 glass border border-slate-700 rounded-2xl p-6">
+        <h2 class="text-xl font-semibold mb-3">Agent Actions</h2>
+        <pre id="agentActions" class="text-xs overflow-auto bg-slate-900 p-4 rounded-xl border border-slate-800 min-h-40"></pre>
+      </section>
+    </div>
+
+    <script>
+      const runBtn = document.getElementById('runBtn');
+      const statusEl = document.getElementById('status');
+      const resultEl = document.getElementById('result');
+      const phaseEl = document.getElementById('phase');
+      const historyEl = document.getElementById('history');
+      const historyBtn = document.getElementById('historyBtn');
+      const runAsyncBtn = document.getElementById('runAsyncBtn');
+      const reviewQueueEl = document.getElementById('reviewQueue');
+      const agentActionsEl = document.getElementById('agentActions');
+      let currentJobId = null;
+
+      async function runAnalysis() {
+        const payload = {
+          query: document.getElementById('query').value.trim(),
+          artist: document.getElementById('artist').value.trim() || null,
+          audio_seconds: Number(document.getElementById('audio_seconds').value),
+          no_download: document.getElementById('no_download').checked,
+        };
+
+        if (!payload.query) {
+          statusEl.textContent = 'Lütfen şarkı adı girin.';
+          return;
+        }
+
+        statusEl.textContent = 'Çalışıyor...';
+        phaseEl.textContent = 'Aşama: metadata/lyrics/audio/features';
+        runBtn.disabled = true;
+        runBtn.classList.add('opacity-60');
+
+        try {
+          const res = await fetch('/api/analyze', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.detail || 'İstek başarısız');
+          statusEl.textContent = 'Tamamlandı ✅';
+          phaseEl.textContent = `Kalite skoru: ${data.result.quality_confidence} | Duplicate: ${data.result.duplicate}`;
+          loadHistory();
+      loadReviewQueue();
+      loadAgentActions();
+          resultEl.textContent = JSON.stringify(data.result, null, 2);
+        } catch (err) {
+          statusEl.textContent = `Hata: ${err.message}`;
+        } finally {
+          runBtn.disabled = false;
+          runBtn.classList.remove('opacity-60');
+        }
+      }
+
+      async function loadHistory() {
+        const res = await fetch('/api/history?limit=10');
+        const data = await res.json();
+        historyEl.textContent = JSON.stringify(data.items, null, 2);
+      }
+
+      async function runAsyncAnalysis() {
+        const payload = {
+          query: document.getElementById('query').value.trim(),
+          artist: document.getElementById('artist').value.trim() || null,
+          audio_seconds: Number(document.getElementById('audio_seconds').value),
+          no_download: document.getElementById('no_download').checked,
+        };
+        if (!payload.query) return;
+        statusEl.textContent = 'Async job başlatılıyor...';
+        const res = await fetch('/api/analyze_async', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+        const data = await res.json();
+        const jobId = data.job_id;
+        currentJobId = jobId;
+        phaseEl.textContent = `Job: ${jobId}`;
+        const poll = setInterval(async () => {
+          const jr = await fetch(`/api/jobs/${jobId}`);
+          const jd = await jr.json();
+          statusEl.textContent = `Job status: ${jd.status} | progress: ${jd.progress || 0}% | stage: ${jd.stage || '-'} `;
+          if (jd.status === 'done' || jd.status === 'failed' || jd.status === 'cancelled') {
+            clearInterval(poll);
+            if (jd.result) resultEl.textContent = JSON.stringify(jd.result, null, 2);
+            loadHistory();
+      loadReviewQueue();
+      loadAgentActions();
+          }
+        }, 1200);
+      }
+
+      async function loadReviewQueue(){
+        const res = await fetch('/api/review_queue?limit=10');
+        const data = await res.json();
+        reviewQueueEl.textContent = JSON.stringify(data.items, null, 2);
+      }
+
+      async function loadAgentActions(){
+        const res = await fetch('/api/agent/actions?limit=10');
+        const data = await res.json();
+        agentActionsEl.textContent = JSON.stringify(data.items, null, 2);
+      }
+
+      async function resolveFirstReview(action){
+        const res = await fetch('/api/review_queue?limit=1');
+        const data = await res.json();
+        const first = (data.items || [])[0];
+        if (!first) return;
+        await fetch(`/api/review_queue/resolve?record_id=${first.record_id}&action=${action}`, {method: "POST"});
+        await loadReviewQueue();
+        await loadHistory();
+      }
+
+      async function cancelCurrentJob(){
+        if (!currentJobId) return;
+        await fetch(`/api/jobs/${currentJobId}/cancel`, {method:'POST'});
+        statusEl.textContent = 'Job iptal edildi';
+      }
+
+      runBtn.addEventListener('click', runAnalysis);
+      runAsyncBtn.addEventListener('click', runAsyncAnalysis);
+      historyBtn.addEventListener('click', loadHistory);
+      historyBtn.addEventListener('click', loadReviewQueue);
+      historyBtn.addEventListener('click', loadAgentActions);
+      document.getElementById('cancelJobBtn').addEventListener('click', cancelCurrentJob);
+      document.getElementById('approveFirstBtn').addEventListener('click', () => resolveFirstReview('approve'));
+      document.getElementById('retryFirstBtn').addEventListener('click', () => resolveFirstReview('retry'));
+      loadHistory();
+      loadReviewQueue();
+      loadAgentActions();
+    </script>
+  </body>
+</html>
