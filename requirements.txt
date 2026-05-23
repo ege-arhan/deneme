@@ -1,0 +1,13 @@
+yt-dlp
+librosa
+soundfile
+numpy
+pandas
+requests
+beautifulsoup4
+lyricsgenius
+spotipy
+python-dotenv
+tqdm
+fastapi
+uvicorn[standard]
